@@ -27,18 +27,6 @@ def load_all_cards():
         return pd.DataFrame()
 
 @st.cache_data(ttl=1800)
-def load_tournaments(limit=100):
-    try:
-        r = requests.get(
-            f"https://play.limitlesstcg.com/api/tournaments?game=OP&limit={limit}",
-            timeout=15
-        )
-        r.raise_for_status()
-        return r.json()
-    except Exception as e:
-        return []
-
-@st.cache_data(ttl=1800)
 def load_standings(tournament_id):
     try:
         r = requests.get(
@@ -49,6 +37,42 @@ def load_standings(tournament_id):
         return r.json()
     except:
         return []
+
+@st.cache_data(ttl=1800)
+def load_top_decklists(tournament_ids, top_n=8):
+    """Lädt Decklisten der Top N Platzierten aus mehreren Turnieren."""
+    all_cards = []
+    for tid in tournament_ids:
+        standings = load_standings(tid)
+        if not standings:
+            continue
+        for player in standings:
+            if player.get("placing", 999) > top_n:
+                continue
+            decklist = player.get("decklist", {})
+            if not decklist or not isinstance(decklist, dict):
+                continue
+            for section_name, section_cards in decklist.items():
+                if section_name == "leader":
+                    continue
+                if isinstance(section_cards, list):
+                    for entry in section_cards:
+                        if isinstance(entry, dict):
+                            card_set = entry.get("set", "")
+                            card_num = entry.get("number", "")
+                            card_id  = f"{card_set}-{card_num}" if card_set and card_num else ""
+                            count    = entry.get("count", 1)
+                            name     = entry.get("name", card_id)
+                            if card_id:
+                                all_cards.append({
+                                    "id": card_id,
+                                    "name": name,
+                                    "count": count,
+                                    "section": section_name,
+                                    "tournament": tid,
+                                    "placing": player.get("placing", 0),
+                                })
+    return all_cards
 
 with st.spinner("Kartendaten werden geladen..."):
     df = load_all_cards()
@@ -425,9 +449,141 @@ with tab5:
                 st.download_button("⬇️ Chase Cards als CSV", data=csv,
                                    file_name="optcg_chase_cards.csv", mime="text/csv")
 
-    with chase_tab2:
-        st.info("⚔️ Spieler-Chase Cards werden nach dem Einbinden der Turnierdaten verfügbar. Dann sehen wir welche Karten in den stärksten Decks unverzichtbar sind.")
+with chase_tab2:
+        st.subheader("⚔️ Spieler-Chase Cards")
+        st.caption("Karten die in den stärksten Turnier-Decks am häufigsten vorkommen.")
 
+        # Einstellungen
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            top_n = st.selectbox("Top Platzierungen analysieren", [4, 8, 16, 32], index=1)
+        with c2:
+            num_tournaments = st.slider("Anzahl Turniere", 5, 50, 20)
+        with c3:
+            min_appearances = st.slider("Mindest-Vorkommen", 1, 20, 3)
+
+        with st.spinner("Analysiere Top-Decklisten aus mehreren Turnieren..."):
+            # Neueste Turniere laden
+            all_tournaments = load_tournaments(limit=200)
+            if all_tournaments:
+                tourn_df_chase = pd.DataFrame(all_tournaments)
+                # Nur Turniere mit genug Spielern
+                tourn_df_chase = tourn_df_chase[tourn_df_chase["players"] >= 64]
+                recent_ids = tourn_df_chase.sort_values("date", ascending=False).head(num_tournaments)["id"].tolist()
+                raw_cards = load_top_decklists(recent_ids, top_n=top_n)
+            else:
+                raw_cards = []
+
+        if not raw_cards:
+            st.warning("Keine Decklisten-Daten verfügbar.")
+        else:
+            cards_df = pd.DataFrame(raw_cards)
+
+            # Häufigkeit pro Karte zählen
+            freq = cards_df.groupby(["id", "name"]).agg(
+                Vorkommen=("tournament", "nunique"),
+                Gesamt_Kopien=("count", "sum"),
+                Ø_Kopien=("count", "mean"),
+            ).reset_index()
+            freq["Ø_Kopien"] = freq["Ø_Kopien"].round(1)
+            freq = freq[freq["Vorkommen"] >= min_appearances]
+            freq = freq.sort_values("Vorkommen", ascending=False)
+
+            # Marktpreis hinzufügen
+            if PRICE in df.columns and "card_set_id" in df.columns:
+                price_lookup = df[["card_set_id", PRICE, COLOR, RARITY]].dropna(subset=["card_set_id"])
+                price_lookup = price_lookup.rename(columns={"card_set_id": "id"})
+                freq = freq.merge(price_lookup, on="id", how="left")
+
+            if freq.empty:
+                st.warning("Nicht genug Daten — weniger Turniere oder niedrigeres Mindest-Vorkommen wählen.")
+            else:
+                # Metriken
+                m1, m2, m3, m4 = st.columns(4)
+                with m1:
+                    st.metric("Analysierte Turniere", len(recent_ids))
+                with m2:
+                    st.metric("Analysierte Decklisten", cards_df["tournament"].nunique() * top_n)
+                with m3:
+                    st.metric("Unverzichtbare Karten", len(freq))
+                with m4:
+                    if PRICE in freq.columns:
+                        avg_p = freq[PRICE].mean()
+                        st.metric("Ø Preis Chase Cards", f"${avg_p:.2f}" if pd.notna(avg_p) else "–")
+
+                st.divider()
+
+                # Top Karten Chart
+                top_freq = freq.head(20)
+                fig = px.bar(
+                    top_freq, x="Vorkommen", y="name",
+                    orientation="h",
+                    title=f"Top 20 Spieler-Chase Cards (aus Top {top_n} von {len(recent_ids)} Turnieren)",
+                    color="Vorkommen",
+                    color_continuous_scale="Reds",
+                    hover_data=["Ø_Kopien", "Gesamt_Kopien"],
+                )
+                fig.update_layout(
+                    yaxis={"categoryorder": "total ascending"},
+                    paper_bgcolor="rgba(0,0,0,0)",
+                    height=600,
+                )
+                st.plotly_chart(fig, use_container_width=True)
+
+                # Vorkommen vs. Preis Scatter
+                if PRICE in freq.columns:
+                    st.subheader("Vorkommen vs. Marktpreis")
+                    st.caption("Oben links = häufig gespielt aber günstig = bestes Preis-Leistungs-Verhältnis")
+                    scatter_df = freq[freq[PRICE].notna()].copy()
+                    fig2 = px.scatter(
+                        scatter_df,
+                        x=PRICE,
+                        y="Vorkommen",
+                        hover_name="name",
+                        hover_data=["Ø_Kopien", RARITY],
+                        title="Spielstärke vs. Marktpreis",
+                        labels={PRICE: "Marktpreis ($)", "Vorkommen": "Vorkommen in Top-Decks"},
+                        color="Vorkommen",
+                        color_continuous_scale="RdYlGn",
+                        size="Ø_Kopien",
+                        size_max=20,
+                    )
+                    fig2.update_layout(paper_bgcolor="rgba(0,0,0,0)")
+                    st.plotly_chart(fig2, use_container_width=True)
+
+                # Kartenbilder der Top Chase Cards
+                st.subheader("Top Chase Cards — Galerie")
+                top_gallery = freq.head(15).to_dict("records")
+                cards_per_row = 5
+                for i in range(0, len(top_gallery), cards_per_row):
+                    chunk = top_gallery[i:i+cards_per_row]
+                    cols = st.columns(cards_per_row)
+                    for j, card in enumerate(chunk):
+                        with cols[j]:
+                            card_id = card["id"]
+                            img_url = f"https://optcgapi.com/media/static/Card_Images/{card_id}.jpg"
+                            try:
+                                st.image(img_url, use_container_width=True)
+                            except:
+                                st.write("🃏")
+                            st.caption(f"**{card['name']}**")
+                            st.caption(f"In {card['Vorkommen']} Turnieren")
+                            if PRICE in card and pd.notna(card.get(PRICE)):
+                                st.caption(f"💰 ${float(card[PRICE]):.2f}")
+
+                # Vollständige Tabelle
+                st.subheader("Alle Spieler-Chase Cards")
+                show_cols = [c for c in ["name", "id", "Vorkommen", "Ø_Kopien", PRICE, COLOR, RARITY] if c in freq.columns]
+                st.dataframe(freq[show_cols].reset_index(drop=True),
+                             use_container_width=True, height=400)
+
+                csv = freq[show_cols].to_csv(index=False).encode("utf-8")
+                st.download_button(
+                    "⬇️ Spieler-Chase Cards als CSV",
+                    data=csv,
+                    file_name="optcg_player_chase_cards.csv",
+                    mime="text/csv"
+                )
 # ── Tab 6: Marktbewertung ────────────────────────────────────────────────────
 with tab6:
     st.subheader("📈 Marktbewertung")
