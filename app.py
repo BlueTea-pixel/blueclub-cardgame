@@ -855,6 +855,7 @@ with tourn_tab3:
                                         except:
                                             st.write("🃏")
                                         st.caption(f"**x{count}** {card_id}")
+                            st.write(f"DEBUG: {card}")
 
 # ── Tab 7: Kartensuche ───────────────────────────────────────────────────────
 with tab7:
