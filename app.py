@@ -26,6 +26,30 @@ def load_all_cards():
         st.error(f"Fehler beim Laden: {e}")
         return pd.DataFrame()
 
+@st.cache_data(ttl=1800)
+def load_tournaments(limit=100):
+    try:
+        r = requests.get(
+            f"https://play.limitlesstcg.com/api/tournaments?game=OP&limit={limit}",
+            timeout=15
+        )
+        r.raise_for_status()
+        return r.json()
+    except Exception as e:
+        return []
+
+@st.cache_data(ttl=1800)
+def load_standings(tournament_id):
+    try:
+        r = requests.get(
+            f"https://play.limitlesstcg.com/api/tournaments/{tournament_id}/standings",
+            timeout=15
+        )
+        r.raise_for_status()
+        return r.json()
+    except:
+        return []
+
 with st.spinner("Kartendaten werden geladen..."):
     df = load_all_cards()
 
@@ -96,7 +120,7 @@ with col4:
 st.divider()
 
 # ─── Tabs ───────────────────────────────────────────────────────────────────
-tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
     "📊 Kartentypen",
     "🎨 Farb-Analyse",
     "💰 Kosten-Kurve",
@@ -104,6 +128,7 @@ tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
     "🌟 Chase Cards",
     "📈 Marktbewertung",
     "🔍 Kartensuche",
+    "🏆 Turnierdaten",
 ])
 
 # ── Tab 1: Kartentypen ───────────────────────────────────────────────────────
@@ -575,6 +600,213 @@ with st.sidebar:
             price_str = f"💰 ${float(price):.2f}" if price and str(price) != "nan" else ""
             st.caption(f"**{row[NAME]}** {price_str}")
             st.divider()
+
+# ── Tab 8: Turnierdaten ──────────────────────────────────────────────────────
+with tab8:
+    st.subheader("🏆 Turnierdaten — Limitless TCG")
+    st.caption("Echte Turnierergebnisse · Welche Leader und Decks gewinnen wirklich?")
+
+    with st.spinner("Turnierdaten werden geladen..."):
+        tournaments = load_tournaments(limit=200)
+
+    if not tournaments:
+        st.error("Turnierdaten konnten nicht geladen werden.")
+    else:
+        tourn_df = pd.DataFrame(tournaments)
+        tourn_df["date"] = pd.to_datetime(tourn_df["date"]).dt.date
+
+        # ── Übersicht Metriken
+        m1, m2, m3, m4 = st.columns(4)
+        with m1:
+            st.metric("Turniere geladen", len(tourn_df))
+        with m2:
+            st.metric("Gesamt Spieler", f"{tourn_df['players'].sum():,}")
+        with m3:
+            st.metric("Größtes Turnier", f"{tourn_df['players'].max():,} Spieler")
+        with m4:
+            latest = tourn_df["date"].max()
+            st.metric("Letztes Turnier", str(latest))
+
+        st.divider()
+
+        tourn_tab1, tourn_tab2, tourn_tab3 = st.tabs([
+            "📋 Turnierübersicht", "🎯 Leader Meta-Analyse", "🃏 Deck Details"
+        ])
+
+        with tourn_tab1:
+            st.subheader("Alle Turniere")
+
+            # Filter
+            c1, c2 = st.columns(2)
+            with c1:
+                formats = ["Alle"] + sorted(tourn_df["format"].dropna().unique().tolist())
+                sel_format = st.selectbox("Format/Set", formats, key="t_format")
+            with c2:
+                min_players = st.slider("Mindest-Spielerzahl", 0, 500, 64, 32)
+
+            filtered_t = tourn_df.copy()
+            if sel_format != "Alle":
+                filtered_t = filtered_t[filtered_t["format"] == sel_format]
+            filtered_t = filtered_t[filtered_t["players"] >= min_players]
+            filtered_t = filtered_t.sort_values("date", ascending=False)
+
+            # Spieler pro Turnier Chart
+            fig = px.bar(
+                filtered_t.head(30), x="name", y="players",
+                title="Spielerzahl pro Turnier (neueste 30)",
+                color="players", color_continuous_scale="Blues",
+            )
+            fig.update_layout(
+                xaxis_tickangle=-45,
+                paper_bgcolor="rgba(0,0,0,0)",
+                height=400,
+            )
+            st.plotly_chart(fig, use_container_width=True)
+
+            # Turniere über Zeit
+            monthly = filtered_t.copy()
+            monthly["monat"] = pd.to_datetime(monthly["date"]).dt.to_period("M").astype(str)
+            monthly_counts = monthly.groupby("monat").agg(
+                Turniere=("id", "count"),
+                Spieler=("players", "sum")
+            ).reset_index()
+            fig2 = px.line(monthly_counts, x="monat", y="Spieler",
+                           title="Gesamte Spieler pro Monat (Aktivität der Community)",
+                           markers=True)
+            fig2.update_traces(line_color="#3498db")
+            fig2.update_layout(paper_bgcolor="rgba(0,0,0,0)")
+            st.plotly_chart(fig2, use_container_width=True)
+            st.caption("Steigende Linie = wachsendes Interesse am Spiel.")
+
+            # Tabelle
+            show_t = [c for c in ["date", "name", "format", "players"] if c in filtered_t.columns]
+            st.dataframe(filtered_t[show_t].reset_index(drop=True),
+                         use_container_width=True, height=350)
+
+        with tourn_tab2:
+            st.subheader("Leader Meta-Analyse")
+            st.caption("Welche Leader dominieren die Turniere?")
+
+            # Turnier auswählen für Detailanalyse
+            st.info("Wähle ein Turnier um die Leader-Verteilung zu analysieren.")
+
+            recent = tourn_df.sort_values("date", ascending=False).head(50)
+            tourn_options = {
+                f"{row['name']} ({row['players']} Spieler, {row['date']})": row["id"]
+                for _, row in recent.iterrows()
+            }
+
+            selected_tourn = st.selectbox(
+                "Turnier auswählen",
+                options=list(tourn_options.keys()),
+                key="meta_tourn"
+            )
+
+            if selected_tourn:
+                tourn_id = tourn_options[selected_tourn]
+
+                with st.spinner("Platzierungen werden geladen..."):
+                    standings = load_standings(tourn_id)
+
+                if not standings:
+                    st.warning("Keine Daten für dieses Turnier verfügbar.")
+                else:
+                    stand_df = pd.DataFrame(standings)
+
+                    # Wins/Losses extrahieren
+                    if "record" in stand_df.columns:
+                        stand_df["wins"]   = stand_df["record"].apply(lambda x: x.get("wins", 0) if isinstance(x, dict) else 0)
+                        stand_df["losses"] = stand_df["record"].apply(lambda x: x.get("losses", 0) if isinstance(x, dict) else 0)
+                        stand_df["winrate"] = (stand_df["wins"] / (stand_df["wins"] + stand_df["losses"]).replace(0, 1) * 100).round(1)
+
+                    # Leader extrahieren
+                    if "deck" in stand_df.columns:
+                        stand_df["leader"] = stand_df["deck"].apply(
+                            lambda x: x.get("name", "Unbekannt") if isinstance(x, dict) else "Unbekannt"
+                        )
+
+                        # Metriken
+                        m1, m2, m3 = st.columns(3)
+                        with m1:
+                            st.metric("Teilnehmer", len(stand_df))
+                        with m2:
+                            top_leader = stand_df["leader"].value_counts().index[0]
+                            st.metric("Meistgespielter Leader", top_leader)
+                        with m3:
+                            unique_leaders = stand_df["leader"].nunique()
+                            st.metric("Verschiedene Leader", unique_leaders)
+
+                        # Leader Verteilung
+                        leader_counts = stand_df["leader"].value_counts().reset_index()
+                        leader_counts.columns = ["Leader", "Anzahl Spieler"]
+                        leader_counts["Anteil %"] = (leader_counts["Anzahl Spieler"] / len(stand_df) * 100).round(1)
+
+                        fig = px.bar(
+                            leader_counts.head(15), x="Anzahl Spieler", y="Leader",
+                            orientation="h",
+                            title="Leader Verteilung (Top 15)",
+                            color="Anzahl Spieler",
+                            color_continuous_scale="Reds",
+                            hover_data=["Anteil %"],
+                        )
+                        fig.update_layout(
+                            yaxis={"categoryorder": "total ascending"},
+                            paper_bgcolor="rgba(0,0,0,0)",
+                            height=500,
+                        )
+                        st.plotly_chart(fig, use_container_width=True)
+
+                        # Winrate pro Leader
+                        if "winrate" in stand_df.columns:
+                            leader_wr = stand_df.groupby("leader").agg(
+                                Spieler=("leader", "count"),
+                                Ø_Winrate=("winrate", "mean"),
+                                Ø_Wins=("wins", "mean"),
+                            ).reset_index()
+                            leader_wr = leader_wr[leader_wr["Spieler"] >= 3]
+                            leader_wr["Ø_Winrate"] = leader_wr["Ø_Winrate"].round(1)
+                            leader_wr["Ø_Wins"] = leader_wr["Ø_Wins"].round(1)
+                            leader_wr = leader_wr.sort_values("Ø_Winrate", ascending=False)
+
+                            fig2 = px.bar(
+                                leader_wr.head(15), x="Ø_Winrate", y="leader",
+                                orientation="h",
+                                title="Durchschnittliche Winrate pro Leader (min. 3 Spieler)",
+                                color="Ø_Winrate",
+                                color_continuous_scale="RdYlGn",
+                                hover_data=["Spieler", "Ø_Wins"],
+                            )
+                            fig2.update_layout(
+                                yaxis={"categoryorder": "total ascending"},
+                                paper_bgcolor="rgba(0,0,0,0)",
+                                height=500,
+                            )
+                            st.plotly_chart(fig2, use_container_width=True)
+                            st.caption("Grün = hohe Winrate · Rot = niedrige Winrate")
+
+                        # Top 8 Platzierungen
+                        st.subheader("Top 8")
+                        top8 = stand_df[stand_df["placing"] <= 8].sort_values("placing")
+                        show_cols = [c for c in ["placing", "name", "leader", "wins", "losses", "winrate"] if c in top8.columns]
+                        st.dataframe(top8[show_cols].reset_index(drop=True), use_container_width=True)
+                    else:
+                        st.info("Keine Deck-Daten für dieses Turnier verfügbar.")
+                        show_cols = [c for c in ["placing", "name", "wins", "losses"] if c in stand_df.columns]
+                        st.dataframe(stand_df[show_cols].head(20).reset_index(drop=True), use_container_width=True)
+
+        with tourn_tab3:
+            st.subheader("🃏 Deck Details")
+            st.info("Wähle zuerst ein Turnier im Tab 'Leader Meta-Analyse' — dann erscheinen hier die vollständigen Decklisten der Top-Platzierten.")
+
+            if "stand_df" in dir() and "leader" in stand_df.columns:
+                top16 = stand_df[stand_df["placing"] <= 16].sort_values("placing")
+                for _, row in top16.iterrows():
+                    with st.expander(f"#{int(row['placing'])} — {row.get('name', '?')} · {row.get('leader', '?')}"):
+                        decklist = row.get("decklist", None)
+                        if decklist and isinstance(decklist, dict):
+                            st.json(decklist)
+                        else:
+                            st.write("Keine Deckliste verfügbar.")
 
 # ── Tab 7: Kartensuche ───────────────────────────────────────────────────────
 with tab7:
