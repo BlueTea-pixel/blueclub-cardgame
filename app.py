@@ -808,19 +808,40 @@ with tourn_tab3:
                             continue
 
 # Karten aus Decklist extrahieren
-                        # Limitless Format: {"leader": [...], "main": [...]}
                         all_cards = []
+
+                        # Leader separat behandeln
+                        if "leader" in decklist and isinstance(decklist["leader"], dict):
+                            leader_data = decklist["leader"]
+                            leader_set  = leader_data.get("set", "")
+                            leader_num  = leader_data.get("number", "")
+                            leader_name = leader_data.get("name", "Leader")
+                            if leader_set and leader_num:
+                                all_cards.append({
+                                    "id": f"{leader_set}-{leader_num}",
+                                    "name": leader_name,
+                                    "count": 1,
+                                    "section": "leader",
+                                })
+
                         for section_name, section_cards in decklist.items():
+                            if section_name == "leader":
+                                continue
                             if isinstance(section_cards, list):
                                 for entry in section_cards:
                                     if isinstance(entry, dict):
-                                        card_id = entry.get("id", entry.get("card", ""))
-                                        count   = entry.get("count", 1)
-                                        all_cards.append({
-                                            "id": str(card_id),
-                                            "count": count,
-                                            "section": section_name,
-                                        })
+                                        card_set = entry.get("set", "")
+                                        card_num = entry.get("number", "")
+                                        card_id  = f"{card_set}-{card_num}" if card_set and card_num else ""
+                                        count    = entry.get("count", 1)
+                                        name     = entry.get("name", card_id)
+                                        if card_id:
+                                            all_cards.append({
+                                                "id": card_id,
+                                                "name": name,
+                                                "count": count,
+                                                "section": section_name,
+                                            })
 
                         # Rohdaten zur Diagnose anzeigen
                         with st.expander("🔧 Rohdaten"):
@@ -842,7 +863,6 @@ with tourn_tab3:
                             total = sum(c["count"] for c in cards)
                             st.markdown(f"**{section_name.capitalize()} ({total} Karten)**")
 
-                            # Karten in Grid anzeigen
                             cards_per_row = 5
                             for i in range(0, len(cards), cards_per_row):
                                 chunk = cards[i:i+cards_per_row]
@@ -851,15 +871,14 @@ with tourn_tab3:
                                     with cols[j]:
                                         card_id = card["id"]
                                         count   = card["count"]
-                                        # Bild-URL aus OPTCG API Format aufbauen
+                                        name    = card.get("name", card_id)
                                         img_url = f"https://optcgapi.com/media/static/Card_Images/{card_id}.jpg"
                                         try:
                                             st.image(img_url, use_container_width=True)
                                         except:
                                             st.write("🃏")
-                                        st.caption(f"**x{count}** {card_id}")
-                            st.write(f"DEBUG: {card}")
-
+                                        st.caption(f"**x{count} {name}**")
+                                        st.caption(f"{card_id}")
 # ── Tab 7: Kartensuche ───────────────────────────────────────────────────────
 with tab7:
     st.subheader("Kartensuche")
