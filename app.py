@@ -807,7 +807,7 @@ with tourn_tab3:
                             st.write("Keine Deckliste verfügbar.")
                             continue
 
-# Karten aus Decklist extrahieren
+                        # Karten aus Decklist extrahieren
                         all_cards = []
 
                         # Leader separat behandeln
@@ -843,10 +843,6 @@ with tourn_tab3:
                                                 "section": section_name,
                                             })
 
-                        # Rohdaten zur Diagnose anzeigen
-                        with st.expander("🔧 Rohdaten"):
-                            st.json(decklist)
-
                         if not all_cards:
                             st.write("Deckliste konnte nicht gelesen werden.")
                             continue
@@ -878,7 +874,6 @@ with tourn_tab3:
                                         except:
                                             st.write("🃏")
                                         st.caption(f"**x{count} {name}**")
-                                        st.caption(f"{card_id}")
 # ── Tab 7: Kartensuche ───────────────────────────────────────────────────────
 with tab7:
     st.subheader("Kartensuche")
