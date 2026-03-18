@@ -794,19 +794,67 @@ with tab8:
                         show_cols = [c for c in ["placing", "name", "wins", "losses"] if c in stand_df.columns]
                         st.dataframe(stand_df[show_cols].head(20).reset_index(drop=True), use_container_width=True)
 
-        with tourn_tab3:
+with tourn_tab3:
             st.subheader("🃏 Deck Details")
-            st.info("Wähle zuerst ein Turnier im Tab 'Leader Meta-Analyse' — dann erscheinen hier die vollständigen Decklisten der Top-Platzierten.")
-
+            st.info("Wähle zuerst ein Turnier im Tab 'Leader Meta-Analyse' — dann erscheinen hier die Decklisten.")
             if "stand_df" in dir() and "leader" in stand_df.columns:
                 top16 = stand_df[stand_df["placing"] <= 16].sort_values("placing")
                 for _, row in top16.iterrows():
-                    with st.expander(f"#{int(row['placing'])} — {row.get('name', '?')} · {row.get('leader', '?')}"):
+                    label = f"#{int(row['placing'])} — {row.get('name', '?')} · {row.get('leader', '?')}"
+                    with st.expander(label):
                         decklist = row.get("decklist", None)
-                        if decklist and isinstance(decklist, dict):
-                            st.json(decklist)
-                        else:
+                        if not decklist or not isinstance(decklist, dict):
                             st.write("Keine Deckliste verfügbar.")
+                            continue
+
+                        # Karten aus Decklist extrahieren
+                        # Limitless Format: {"leader": [...], "main": [...]}
+                        all_cards = []
+                        for section_name, section_cards in decklist.items():
+                            if isinstance(section_cards, list):
+                                for entry in section_cards:
+                                    if isinstance(entry, dict):
+                                        card_id  = entry.get("id", entry.get("card", ""))
+                                        count    = entry.get("count", 1)
+                                        all_cards.append({
+                                            "id": str(card_id),
+                                            "count": count,
+                                            "section": section_name,
+                                        })
+
+                        if not all_cards:
+                            st.write("Deckliste konnte nicht gelesen werden.")
+                            st.json(decklist)
+                            continue
+
+                        # Karten nach Sektion gruppieren
+                        sections = {}
+                        for c in all_cards:
+                            s = c["section"]
+                            if s not in sections:
+                                sections[s] = []
+                            sections[s].append(c)
+
+                        for section_name, cards in sections.items():
+                            total = sum(c["count"] for c in cards)
+                            st.markdown(f"**{section_name.capitalize()} ({total} Karten)**")
+
+                            # Karten in Grid anzeigen
+                            cards_per_row = 5
+                            for i in range(0, len(cards), cards_per_row):
+                                chunk = cards[i:i+cards_per_row]
+                                cols = st.columns(cards_per_row)
+                                for j, card in enumerate(chunk):
+                                    with cols[j]:
+                                        card_id = card["id"]
+                                        count   = card["count"]
+                                        # Bild-URL aus OPTCG API Format aufbauen
+                                        img_url = f"https://optcgapi.com/media/static/Card_Images/{card_id}.jpg"
+                                        try:
+                                            st.image(img_url, use_container_width=True)
+                                        except:
+                                            st.write("🃏")
+                                        st.caption(f"**x{count}** {card_id}")
 
 # ── Tab 7: Kartensuche ───────────────────────────────────────────────────────
 with tab7:
