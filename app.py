@@ -822,14 +822,14 @@ with tourn_tab3:
                                             "section": section_name,
                                         })
 
-if not all_cards:
+                            if not all_cards:
                             st.write("Deckliste konnte nicht gelesen werden.")
                             st.json(decklist)
                             continue
                         
                         # Zeige rohe Deckliste zur Diagnose
                         with st.expander("🔧 Rohdaten"):
-                            st.json(decklist)
+                             st.json(decklist)
                         # Karten nach Sektion gruppieren
                         sections = {}
                         for c in all_cards:
