@@ -96,13 +96,14 @@ with col4:
 st.divider()
 
 # ─── Tabs ───────────────────────────────────────────────────────────────────
-tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
     "📊 Kartentypen",
     "🎨 Farb-Analyse",
     "💰 Kosten-Kurve",
     "💎 Undervalued Cards",
     "🌟 Chase Cards",
     "📈 Marktbewertung",
+    "🔍 Kartensuche",
 ])
 
 # ── Tab 1: Kartentypen ───────────────────────────────────────────────────────
@@ -574,6 +575,63 @@ with st.sidebar:
             price_str = f"💰 ${float(price):.2f}" if price and str(price) != "nan" else ""
             st.caption(f"**{row[NAME]}** {price_str}")
             st.divider()
+
+# ── Tab 7: Kartensuche ───────────────────────────────────────────────────────
+with tab7:
+    st.subheader("Kartensuche")
+
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        search7 = st.text_input("Name enthält...", placeholder="z.B. Luffy", key="search7")
+    with c2:
+        col_opts = ["Alle"] + sorted(df[COLOR].dropna().unique().tolist())
+        sel_color = st.selectbox("Farbe", col_opts, key="search_color")
+    with c3:
+        if TYPE in df.columns:
+            type_opts = ["Alle"] + sorted(df[TYPE].dropna().unique().tolist())
+            sel_type = st.selectbox("Typ", type_opts, key="search_type")
+        else:
+            sel_type = "Alle"
+
+    show_images = st.toggle("Kartenbilder anzeigen", value=False, key="search_images")
+
+    result = df.copy()
+    if search7:
+        result = result[result[NAME].astype(str).str.contains(search7, case=False, na=False)]
+    if sel_color != "Alle":
+        result = result[result[COLOR].astype(str).str.contains(sel_color, na=False)]
+    if sel_type != "Alle" and TYPE in df.columns:
+        result = result[result[TYPE].astype(str) == sel_type]
+
+    st.write(f"**{len(result)}** Karten gefunden")
+
+    if show_images and IMAGE in result.columns:
+        cards_per_row = 5
+        items = result.head(30).to_dict("records")
+        for i in range(0, len(items), cards_per_row):
+            cols = st.columns(cards_per_row)
+            for j, card in enumerate(items[i:i+cards_per_row]):
+                with cols[j]:
+                    img_url = card.get(IMAGE, "")
+                    if img_url and str(img_url) != "nan":
+                        try:
+                            st.image(str(img_url), use_container_width=True)
+                        except:
+                            st.write("🃏")
+                    st.caption(f"**{card.get(NAME, '')}**")
+                    price = card.get(PRICE, "")
+                    if price and str(price) != "nan":
+                        st.caption(f"💰 ${float(price):.2f}")
+        if len(result) > 30:
+            st.info("Zeige erste 30 Karten. Suche verfeinern für mehr.")
+    else:
+        show_cols = [c for c in [NAME, COLOR, COST, POWER, TYPE, SET_ID, RARITY, PRICE, TEXT] if c in result.columns]
+        st.dataframe(result[show_cols].reset_index(drop=True),
+                     use_container_width=True, height=400)
+
+    csv = result.to_csv(index=False).encode("utf-8")
+    st.download_button("⬇️ Als CSV herunterladen", data=csv,
+                       file_name="optcg_karten.csv", mime="text/csv")
 
 st.divider()
 st.caption("Daten: optcgapi.com · Kein offizielles Bandai-Produkt")
