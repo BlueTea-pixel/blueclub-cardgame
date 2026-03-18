@@ -59,7 +59,7 @@ def load_top_decklists(tournament_ids, top_n=8):
         if not standings:
             continue
         for player in standings:
-            if player.get("placing", 999) > top_n:
+            if int(player.get("placing") or 999) > top_n:
                 continue
             decklist = player.get("decklist", {})
             if not decklist or not isinstance(decklist, dict):
