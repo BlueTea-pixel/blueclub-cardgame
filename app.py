@@ -807,29 +807,29 @@ with tourn_tab3:
                             st.write("Keine Deckliste verfügbar.")
                             continue
 
-                        # Karten aus Decklist extrahieren
+# Karten aus Decklist extrahieren
                         # Limitless Format: {"leader": [...], "main": [...]}
                         all_cards = []
                         for section_name, section_cards in decklist.items():
                             if isinstance(section_cards, list):
                                 for entry in section_cards:
                                     if isinstance(entry, dict):
-                                        card_id  = entry.get("id", entry.get("card", ""))
-                                        count    = entry.get("count", 1)
+                                        card_id = entry.get("id", entry.get("card", ""))
+                                        count   = entry.get("count", 1)
                                         all_cards.append({
                                             "id": str(card_id),
                                             "count": count,
                                             "section": section_name,
                                         })
 
-                            if not all_cards:
-                            st.write("Deckliste konnte nicht gelesen werden.")
-                            st.json(decklist)
-                            continue
-                        
-                        # Zeige rohe Deckliste zur Diagnose
+                        # Rohdaten zur Diagnose anzeigen
                         with st.expander("🔧 Rohdaten"):
-                             st.json(decklist)
+                            st.json(decklist)
+
+                        if not all_cards:
+                            st.write("Deckliste konnte nicht gelesen werden.")
+                            continue
+
                         # Karten nach Sektion gruppieren
                         sections = {}
                         for c in all_cards:
